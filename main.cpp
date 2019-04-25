@@ -8,6 +8,8 @@
 #include <vector>
 #include <array>
 #include <iostream>
+#include <algorithm>
+#include <iterator>
 
 using namespace std;
 
@@ -17,32 +19,45 @@ int SINK = -1;
 int TOTALSEED = 2;
 int FORECODE = 255;
 int BACKCODE = 0;
+int CUTCOLOR [] = {0,0,0};
 vector<array<int, 2>> cuts;
 
 int main(){
-   FILE *imageFile;
-   int x,y,pixel,height=4,width=4;
-
-   imageFile=fopen("image.ppm","wb");
-   if(imageFile==NULL){
-      perror("ERROR: Cannot open output file");
-      exit(EXIT_FAILURE);
-   }
-
-   fprintf(imageFile,"P6\n");               // P6 filetype
-   fprintf(imageFile,"%d %d\n",width,height);   // dimensions
-   fprintf(imageFile,"255\n");              // Max pixel
-
+   //convert image.ppm -scale 400x result.png
    unsigned char pix[]={0,255,255, 0,255,255, 255,255,255, 0,255,255,
                         255,255,255, 255,255,255, 0,255,255, 0,255,255,
                         255,255,255, 255,255,255, 0,255,255, 0,255,255,
                         255,255,255, 255,255,255, 0,255,255, 0,255,255};
 
-   fwrite(pix,1,sizeof(pix),imageFile);
+   int height = 4;
+   int width = sizeof(pix)/3/height;
 
-   fclose(imageFile);
-   //convert image.ppm -scale 400x result.png
+   createImage(pix, height, width, "image.ppm");
+
+   char pixSigned[width*height*3];
+   for(int i = 0; i<width*height*3; i++){
+      pixSigned[i] = (signed char) pix[i];
+   }
+
+   imageSegmentation(pixSigned, width, height);
    return 0;
+}
+
+void createImage(unsigned char pix[], int width, int height, const char* fileName){
+   FILE *imageFile;
+   int x,y,pixel;
+
+   imageFile=fopen(fileName,"wb");
+   if(imageFile==NULL){
+      perror("ERROR: Cannot open output file");
+      exit(EXIT_FAILURE);
+   }
+
+   fprintf(imageFile,"P6\n"); // P6 filetype
+   fprintf(imageFile,"%d %d\n",width,height); // dimensions
+   fprintf(imageFile,"255\n"); // Max pixel
+   fwrite(pix,1,sizeof(pix),imageFile);
+   fclose(imageFile);
 }
 
 class Graph {
@@ -80,7 +95,33 @@ void imageSegmentation(char pix[], int width, int height){
    Graph graph = buildGraph(pix, height, width);
    SOURCE += graph.totalNode;
    SINK += graph.totalNode;
-   //augmentingPath
+   augmentingPath(graph, SOURCE, SINK);
+   char pixCut [width*height*3];
+   for (int i=0; i<width*height*3; i++){
+      pixCut[i] = pix[i];
+   }
+   createCut(pixCut, width, height);
+}
+
+void createCut(char pixCut[], int width, int height){
+   for (int i=0; i<cuts.size(); i++){
+      int x = cuts[i][0];
+      int y = cuts[i][1];
+      if(x != SOURCE && x != SINK && y != SOURCE && y != SINK){
+         pixCut[coordinatToPoint(x/width, x%width, width)*3] = CUTCOLOR[0];
+         pixCut[coordinatToPoint(x/width, x%width, width)*3+1] = CUTCOLOR[1];
+         pixCut[coordinatToPoint(x/width, x%width, width)*3+2] = CUTCOLOR[2];
+         pixCut[coordinatToPoint(y/width, y%width, width)*3] = CUTCOLOR[0];
+         pixCut[coordinatToPoint(y/width, y%width, width)*3+1] = CUTCOLOR[1];
+         pixCut[coordinatToPoint(y/width, y%width, width)*3+2] = CUTCOLOR[2];
+      }
+   }
+
+   unsigned char pixCutUnsigned[width*height*3];
+   for(int i = 0; i<width*height*3; i++){
+      pixCutUnsigned[i] = (unsigned char) pixCut[i];
+   }
+   createImage(pixCutUnsigned, width, height, "imagecut.ppm");
 }
 
 Graph buildGraph(char pix[], int height, int width){
