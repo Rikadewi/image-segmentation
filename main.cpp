@@ -16,32 +16,11 @@ using namespace std;
 int SIGMA = 30;
 int SOURCE = -2;
 int SINK = -1;
-int TOTALSEED = 2;
+int TOTALSEED = 1;
 int FORECODE = 255;
 int BACKCODE = 0;
 int CUTCOLOR [] = {0,0,0};
 vector<array<int, 2>> cuts;
-
-int main(){
-   //convert image.ppm -scale 400x result.png
-   unsigned char pix[]={0,255,255, 0,255,255, 255,255,255, 0,255,255,
-                        255,255,255, 255,255,255, 0,255,255, 0,255,255,
-                        255,255,255, 255,255,255, 0,255,255, 0,255,255,
-                        255,255,255, 255,255,255, 0,255,255, 0,255,255};
-
-   int height = 4;
-   int width = sizeof(pix)/3/height;
-
-   createImage(pix, height, width, "image.ppm");
-
-   char pixSigned[width*height*3];
-   for(int i = 0; i<width*height*3; i++){
-      pixSigned[i] = (signed char) pix[i];
-   }
-
-   imageSegmentation(pixSigned, width, height);
-   return 0;
-}
 
 void createImage(unsigned char pix[], int width, int height, const char* fileName){
    FILE *imageFile;
@@ -56,7 +35,7 @@ void createImage(unsigned char pix[], int width, int height, const char* fileNam
    fprintf(imageFile,"P6\n"); // P6 filetype
    fprintf(imageFile,"%d %d\n",width,height); // dimensions
    fprintf(imageFile,"255\n"); // Max pixel
-   fwrite(pix,1,sizeof(pix),imageFile);
+   fwrite(pix,1,width*height*3,imageFile);
    fclose(imageFile);
 }
 
@@ -91,16 +70,15 @@ class Graph {
       }
 };
 
-void imageSegmentation(char pix[], int width, int height){
-   Graph graph = buildGraph(pix, height, width);
-   SOURCE += graph.totalNode;
-   SINK += graph.totalNode;
-   augmentingPath(graph, SOURCE, SINK);
-   char pixCut [width*height*3];
-   for (int i=0; i<width*height*3; i++){
-      pixCut[i] = pix[i];
-   }
-   createCut(pixCut, width, height);
+//from (row,col) to point in image
+int coordinatToPoint(int x, int y, int width){
+   return (x*width + y);
+}
+
+// large when ip-iq < sigma, small otherwise
+int boundaryPenalty(char ip, char iq){
+   int bp = 100 * exp(- pow(int(ip) - int(iq), 2) / (2 * pow(SIGMA, 2)));
+   return bp;
 }
 
 void createCut(char pixCut[], int width, int height){
@@ -124,13 +102,6 @@ void createCut(char pixCut[], int width, int height){
    createImage(pixCutUnsigned, width, height, "imagecut.ppm");
 }
 
-Graph buildGraph(char pix[], int height, int width){
-   Graph graph(height*width + 2);
-   int K = makeNLinks(pix, height, width, graph);
-   plantSeed(pix, width, height, graph, K);
-   return graph;
-}
-
 // return max boundary penalty
 int makeNLinks(char pix[], int height, int width, Graph& graph){
    int x,y, bp;
@@ -141,6 +112,7 @@ int makeNLinks(char pix[], int height, int width, Graph& graph){
          // pixel below
          if(i+1<height){
             y = coordinatToPoint(i+1,j,width);
+   
             bp = boundaryPenalty(pix[x*3], pix[y*3]);
             graph.matrix[x][y] = bp;
             graph.matrix[y][x] = bp;
@@ -179,15 +151,50 @@ void plantSeed(char pix[], int width, int height, Graph& graph, int K){
    }
 }
 
-//from (row,col) to point in image
-int coordinatToPoint(int x, int y, int width){
-   return (x*width + y);
+Graph buildGraph(char pix[], int height, int width){
+   Graph graph(height*width + 2);
+   int K = makeNLinks(pix, height, width, graph);
+   plantSeed(pix, width, height, graph, K);
+   return graph;
 }
 
-// large when ip-iq < sigma, small otherwise
-int boundaryPenalty(char ip, char iq){
-   int bp = 100 * exp(- pow(int(ip) - int(iq), 2) / (2 * pow(SIGMA, 2)));
-   return bp;
+bool bfs(Graph rGraph, int V, int s, int t, int (&parent)[]){
+   queue <int> q;
+   bool visited[V];
+   int i;
+   memset(visited, false, V);
+   q.push(s);
+   visited[s] = true;
+   parent[s] = -1;
+   while(!q.empty()){
+      int u = q.front();
+      q.pop();
+      for (i=0; i<V; i++){
+         if(!visited[i] && rGraph.matrix[u][i]>0){
+            q.push(i);
+            parent[i] = u;
+            visited[i]= true;
+         }
+      }
+   }
+   return visited[i];
+}
+
+void dfs(Graph rGraph, int V, int s, bool visited[]){
+   stack <int> st;
+   st.push(s);
+   while (!st.empty()){
+      int v = st.top();
+      st.pop();
+      if(!visited[v]){
+         visited[v] = true;
+         for(int i=0; i<V; i++){
+            if(rGraph.matrix[v][i]){
+               st.push(i);
+            }
+         }
+      }
+   }
 }
 
 void augmentingPath(Graph graph, int s, int t){
@@ -216,7 +223,6 @@ void augmentingPath(Graph graph, int s, int t){
    bool visited[V];
    memset(visited, false, V);
    dfs(rGraph, V, s, visited);
-
    for(int i=0; i<V; i++){
       for(int j=0; j<V; j++){
          if(visited[i] && !visited[j] && graph.matrix[i][j]){
@@ -226,39 +232,35 @@ void augmentingPath(Graph graph, int s, int t){
    }
 }
 
-bool bfs(Graph rGraph, int V, int s, int t, int parent[]){
-   queue <int> q;
-   bool visited[V];
-   int i;
-   memset(visited, false, V);
-   q.push(s);
-   visited[s] = true;
-   parent[s] = -1;
-   while(!q.empty()){
-      int u = q.pop();
-      for (i=0; i<V; i++){
-         if(!visited[i] && rGraph.matrix[u][i]>0){
-            q.push(i);
-            parent[i] = u;
-            visited[i]= true;
-         }
-      }
+void imageSegmentation(char pix[], int width, int height){
+   Graph graph = buildGraph(pix, height, width);
+   SOURCE += graph.totalNode;
+   SINK += graph.totalNode;
+   augmentingPath(graph, SOURCE, SINK);
+   char pixCut [width*height*3];
+   for (int i=0; i<width*height*3; i++){
+      pixCut[i] = pix[i];
    }
-   return visited[i];
+   createCut(pixCut, width, height);
 }
 
-void dfs(Graph rGraph, int V, int s, bool visited[]){
-   stack <int> st;
-   st.push(s);
-   while (!st.empty()){
-      int v = st.pop();
-      if(!visited[v]){
-         visited[v] = true;
-         for(int i=0; i<V; i++){
-            if(rGraph.matrix[v][i]){
-               st.push(i);
-            }
-         }
-      }
+int main(){
+   unsigned char pix[]={0,255,255, 0,255,255, 255,255,255, 0,255,255,
+                        0,255,255, 0,255,255, 255,255,255, 0,255,255,
+                        255,255,255, 255,255,255, 0,255,255, 0,255,255,
+                        255,255,255, 255,255,255, 0,255,255, 0,255,255,
+                        255,255,255, 255,255,255, 0,255,255, 0,255,255};
+
+   int height = 5;
+   int width = sizeof(pix)/3/height;
+
+   createImage(pix, width, height, "image.ppm");
+
+   char pixSigned[width*height*3];
+   for(int i = 0; i<width*height*3; i++){
+      pixSigned[i] = (signed char) pix[i];
    }
+
+   imageSegmentation(pixSigned, width, height);
+   return 0;
 }
